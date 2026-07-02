@@ -13,6 +13,9 @@
 #   3. codex CLI           — OpenAI's Codex agent, so it follows you into every
 #                            repo's codespace (the nodeshift devcontainer already
 #                            installs it; other repos won't).
+#   4. Atlassian Rovo (codex) — the same Jira/Confluence tools for codex, via the
+#                            curated codex plugin (preferred) or an mcp-remote
+#                            bridge fallback. OAuth is a one-time login.
 #
 # Idempotent + non-fatal by design: every step self-skips when already done and
 # never aborts the codespace if a network fetch fails — a missing personal
@@ -88,8 +91,36 @@ install_codex() {
   rm -rf "${tmp}"
 }
 
+# ---- 4. Atlassian Rovo for codex ------------------------------------------
+# Give the codex agent the same Jira/Confluence tools. Prefer the first-class
+# curated plugin (atlassian-rovo@openai-curated); if that marketplace isn't
+# provisioned in this codespace, fall back to bridging Atlassian's OAuth remote
+# MCP over stdio via mcp-remote. Idempotent + non-fatal. OAuth is one-time:
+# `codex mcp login atlassian-rovo` (plugin) or `codex mcp login atlassian`.
+setup_codex_atlassian() {
+  command -v codex >/dev/null 2>&1 || { log "codex not on PATH — skipping codex Atlassian setup"; return 0; }
+  local cfg="${HOME}/.codex/config.toml"
+  if grep -q 'atlassian-rovo@openai-curated' "${cfg}" 2>/dev/null \
+     || grep -q '\[mcp_servers.atlassian\]' "${cfg}" 2>/dev/null; then
+    log "codex Atlassian already configured, skipping"
+    return 0
+  fi
+  log "adding Atlassian Rovo to codex (curated plugin)"
+  if codex plugin add atlassian-rovo@openai-curated >/dev/null 2>&1; then
+    log "codex atlassian-rovo plugin added — run 'codex mcp login atlassian-rovo' to authenticate"
+    return 0
+  fi
+  log "curated plugin unavailable — falling back to mcp-remote bridge"
+  if codex mcp add atlassian -- npx -y mcp-remote https://mcp.atlassian.com/v1/sse >/dev/null 2>&1; then
+    log "codex atlassian MCP (bridge) added — run 'codex mcp login atlassian' to authenticate"
+  else
+    log "codex Atlassian setup failed (continuing)"
+  fi
+}
+
 log "bootstrapping from ${DOTFILES}"
 link_skills
 setup_atlassian_plugin
 install_codex
-log "done — sign in once: run 'claude', then /mcp to authenticate Jira"
+setup_codex_atlassian
+log "done — sign in once: 'claude' + /mcp for Jira; 'codex mcp login atlassian-rovo' for codex Jira"

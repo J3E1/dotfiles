@@ -9,8 +9,9 @@ Personal environment layer that GitHub Codespaces installs automatically into
 | Step | Result | Auth |
 |---|---|---|
 | **Claude skills** | Symlinks the 21 skills under `claude/skills/` into `~/.claude/skills` | none |
-| **Jira MCP** | Installs + enables `atlassian@claude-plugins-official` | one-time OAuth via `/mcp` |
+| **Jira MCP (Claude)** | Installs + enables `atlassian@claude-plugins-official` | one-time OAuth via `/mcp` |
 | **codex CLI** | Installs OpenAI Codex (Linux codespaces; skips if already present) | `codex` sign-in |
+| **Jira MCP (codex)** | Adds `atlassian-rovo@openai-curated` plugin (falls back to an `mcp-remote` bridge) | `codex mcp login atlassian-rovo` |
 
 It is idempotent and non-fatal — safe to re-run, never blocks a codespace boot.
 
