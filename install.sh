@@ -6,6 +6,8 @@
 #
 #   1. Claude Code skills  — the personal skills from ~/.claude/skills, baked
 #                            into this repo under claude/skills/ and linked in.
+#                            The same skills are also mirrored into
+#                            ~/.codex/prompts as /<name> slash commands for codex.
 #   2. Jira (Atlassian) MCP — the official atlassian plugin, installed + enabled
 #                            so the mcp__Atlassian_Rovo__* tools are available.
 #                            (OAuth sign-in is a one-time step per codespace —
@@ -40,6 +42,26 @@ link_skills() {
     count=$((count + 1))
   done
   log "linked ${count} Claude skills into ~/.claude/skills"
+}
+
+# ---- 1b. Codex skills (custom prompts) ------------------------------------
+# Codex has no native "skills" dir, but markdown files under ~/.codex/prompts
+# surface as /<name> slash commands. Mirror each baked SKILL.md there as
+# <name>.md so the same skills follow me into codex. Any helper scripts a skill
+# references by absolute path (e.g. ~/.claude/skills/<name>/*.sh) still resolve,
+# since link_skills already put them on disk.
+link_skills_codex() {
+  local src="${DOTFILES}/claude/skills"
+  [ -d "${src}" ] || { log "no skills to link for codex"; return 0; }
+  mkdir -p "${HOME}/.codex/prompts"
+  local count=0
+  for skill in "${src}"/*/; do
+    [ -d "${skill}" ] || continue
+    [ -f "${skill}SKILL.md" ] || continue
+    ln -sfn "${skill}SKILL.md" "${HOME}/.codex/prompts/$(basename "${skill%/}").md"
+    count=$((count + 1))
+  done
+  log "linked ${count} skills into ~/.codex/prompts (use as /<name> in codex)"
 }
 
 # ---- 2. Jira / Atlassian MCP (official plugin) ----------------------------
@@ -120,6 +142,7 @@ setup_codex_atlassian() {
 
 log "bootstrapping from ${DOTFILES}"
 link_skills
+link_skills_codex
 setup_atlassian_plugin
 install_codex
 setup_codex_atlassian
