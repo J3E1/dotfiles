@@ -4,10 +4,11 @@
 # Codespaces on every codespace it creates (any repo). Its job is to lay down
 # the personal layer that the shared .devcontainer can't carry:
 #
-#   1. Claude Code skills  — the personal skills from ~/.claude/skills, baked
-#                            into this repo under claude/skills/ and linked in.
-#                            The same skills are also mirrored into
-#                            ~/.codex/prompts as /<name> slash commands for codex.
+#   1. Agent skills        — the personal skills baked into this repo under
+#                            skills/, linked into BOTH ~/.claude/skills (Claude
+#                            Code) and ~/.agents/skills (codex's native skills
+#                            dir). One shared source, same SKILL.md format, so
+#                            both agents auto-activate the same skills.
 #   2. Jira (Atlassian) MCP — the official atlassian plugin, installed + enabled
 #                            so the mcp__Atlassian_Rovo__* tools are available.
 #                            (OAuth sign-in is a one-time step per codespace —
@@ -28,41 +29,34 @@ set -uo pipefail
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log() { echo "[dotfiles] $*"; }
 
-# ---- 1. Claude Code skills ------------------------------------------------
-# Symlink each baked skill into ~/.claude/skills so edits in this repo reflect
-# live. Claude reads <name>/SKILL.md whether the entry is a dir or a symlink.
-link_skills() {
-  local src="${DOTFILES}/claude/skills"
-  [ -d "${src}" ] || { log "no skills to link"; return 0; }
-  mkdir -p "${HOME}/.claude/skills"
-  local count=0
-  for skill in "${src}"/*/; do
-    [ -d "${skill}" ] || continue
-    ln -sfn "${skill%/}" "${HOME}/.claude/skills/$(basename "${skill}")"
-    count=$((count + 1))
-  done
-  log "linked ${count} Claude skills into ~/.claude/skills"
-}
-
-# ---- 1b. Codex skills (custom prompts) ------------------------------------
-# Codex has no native "skills" dir, but markdown files under ~/.codex/prompts
-# surface as /<name> slash commands. Mirror each baked SKILL.md there as
-# <name>.md so the same skills follow me into codex. Any helper scripts a skill
-# references by absolute path (e.g. ~/.claude/skills/<name>/*.sh) still resolve,
-# since link_skills already put them on disk.
-link_skills_codex() {
-  local src="${DOTFILES}/claude/skills"
-  [ -d "${src}" ] || { log "no skills to link for codex"; return 0; }
-  mkdir -p "${HOME}/.codex/prompts"
+# ---- 1. Skills (Claude + codex share one source) --------------------------
+# All skills live under this repo's skills/ dir. Both agents read the SAME
+# <name>/SKILL.md format (name + description frontmatter, auto-activated on
+# description match), so a single baked copy serves both. We symlink — not copy
+# — each skill dir into each agent's skills location so edits in this repo
+# reflect live, and both agents follow symlinked skill folders.
+#
+#   Claude Code : ~/.claude/skills/<name>
+#   codex       : ~/.agents/skills/<name>   (codex's current native skills dir;
+#                 the older ~/.codex/skills is deprecated. Repo-scoped skills
+#                 would go in .agents/skills — we install user-scoped here.)
+link_skill_dirs() {
+  local dest="$1" label="$2"
+  local src="${DOTFILES}/skills"
+  [ -d "${src}" ] || { log "no skills to link for ${label}"; return 0; }
+  mkdir -p "${dest}"
   local count=0
   for skill in "${src}"/*/; do
     [ -d "${skill}" ] || continue
     [ -f "${skill}SKILL.md" ] || continue
-    ln -sfn "${skill}SKILL.md" "${HOME}/.codex/prompts/$(basename "${skill%/}").md"
+    ln -sfn "${skill%/}" "${dest}/$(basename "${skill%/}")"
     count=$((count + 1))
   done
-  log "linked ${count} skills into ~/.codex/prompts (use as /<name> in codex)"
+  log "linked ${count} skills into ${dest} (${label})"
 }
+
+link_skills()       { link_skill_dirs "${HOME}/.claude/skills" "Claude Code"; }
+link_skills_codex() { link_skill_dirs "${HOME}/.agents/skills" "codex"; }
 
 # ---- 2. Jira / Atlassian MCP (official plugin) ----------------------------
 # Adds the anthropics/claude-plugins-official marketplace, installs the
