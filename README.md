@@ -2,14 +2,15 @@
 
 Personal environment layer that GitHub Codespaces installs automatically into
 **every** codespace I create, on any repo. It carries the things a shared
-`.devcontainer` can't: my Claude Code skills, my Jira MCP, and the codex CLI.
+`.devcontainer` can't: my agent skills (Claude Code + codex), my Jira MCP, and
+the codex CLI.
 
 ## What `install.sh` does
 
 | Step | Result | Auth |
 |---|---|---|
-| **Claude skills** | Symlinks the 3 skills under `claude/skills/` into `~/.claude/skills` | none |
-| **Codex skills** | Mirrors each skill's `SKILL.md` into `~/.codex/prompts/<name>.md` as a `/<name>` slash command | none |
+| **Claude skills** | Symlinks each skill under `skills/` into `~/.claude/skills` | none |
+| **Codex skills** | Symlinks each skill under `skills/` into `~/.agents/skills` (codex's native skills dir) — same `SKILL.md`, auto-activated | none |
 | **Jira MCP (Claude)** | Installs + enables `atlassian@claude-plugins-official` | one-time OAuth via `/mcp` |
 | **codex CLI** | Installs OpenAI Codex (Linux codespaces; skips if already present) | `codex` sign-in |
 | **Jira MCP (codex)** | Adds `atlassian-rovo@openai-curated` plugin (falls back to an `mcp-remote` bridge) | `codex mcp login atlassian-rovo` |
@@ -40,11 +41,11 @@ codex           # sign in to codex if you use it
 
 ## Updating skills later
 
-The skills are copies baked into `claude/skills/`. To refresh them from the
-machine where they're managed:
+The skills are baked into `skills/` (one shared source for both agents). To
+refresh them from the machine where they're managed:
 
 ```sh
-cp -RL ~/.claude/skills/. ~/dotfiles/claude/skills/
-find ~/dotfiles/claude/skills -name .DS_Store -delete
+cp -RL ~/.claude/skills/. ~/dotfiles/skills/
+find ~/dotfiles/skills -name .DS_Store -delete
 git -C ~/dotfiles add -A && git -C ~/dotfiles commit -m "update skills" && git -C ~/dotfiles push
 ```
