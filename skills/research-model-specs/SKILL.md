@@ -62,8 +62,15 @@ Research **only** the model-intrinsic facts (the web can answer these):
 Do **NOT** research or guess these — they are deployment/ops decisions, not model facts, and
 belong to the person doing the seeding:
 
-- `hostingProvider`, `region`, `baseUrl`, `apiKey` — where/how *we* host it.
-- `quality`, `speed` — NSAI's internal relative scores (0-based; frontend denormalizes from 0-100%).
+- `hostingProvider`, `region`, `baseUrl`, `apiKey` — where/how *we* host it. (Anthropic/Gemini
+  rows in this repo use `region: "EU"`, `hostingProvider: "Google"`, `baseUrl/apiKey: null` —
+  mirror the sibling.)
+- `quality`, `speed` — NSAI's internal relative scores. **The web will never give you these.**
+  Set them **relative to the closest sibling model** already in the seed: a newer/better model
+  gets a higher `quality` than the one it succeeds; a "lite"/"mini" gets lower quality + higher
+  speed. `quality` is unbounded above (the `CreateModelDto` comment says so) — a new flagship
+  may exceed all existing scores (e.g. Opus 5 → `100`, above Opus 4.8's `99`). Do NOT copy a
+  sibling's `quality`/`speed` verbatim, or the two models become indistinguishable in the picker.
 - `title`, `version`, `key`, `maxMessagesPerUser` — display/config choices.
 
 For those, emit a placeholder and a one-line note ("ops decision — not researched").
@@ -114,5 +121,78 @@ Return a single report:
 2. ...
 ```
 
-Hand this to whoever creates the model (or to the `add-model` / seed flow). The draft row must
-contain **only** verified values — leave `UNVERIFIED` fields blank so nobody accidentally ships a guess.
+The draft row must contain **only** verified values — leave `UNVERIFIED` fields blank so nobody
+accidentally ships a guess. Then register the model using the checklist below.
+
+## Where a model must be registered (codebase placement checklist)
+
+**A model is NOT just a seed row.** A single model name is hardcoded in ~6 places, and missing
+any one leaves the model mis-sorted, absent from a picker, or (for some Claude models) throwing
+provider 400s. Adding the seed row alone is the #1 way to ship a half-wired model.
+
+**Find every place first — grep an existing sibling.** Before editing anything, pick the closest
+already-shipped model (e.g. `claude-opus-4-8`, `gemini-3.5-flash`) and grep the whole repo for
+its name in every form:
+
+```bash
+grep -rniE "opus-4-8|opus 4\.8|ClaudeOpus4_?8" --include=*.ts --include=*.tsx \
+  --include=*.mjs --include=*.md . | grep -v node_modules | grep -v /dist/
+```
+
+Every hit is a candidate placement. Triage them into: **functional** (add the new model),
+**decision** (ask/flag), **leave** (tests + comments).
+
+### Functional — add the new model to ALL of these
+
+| Location | What to add |
+|---|---|
+| `apps/nsai/migrations/data/models/<provider>.ts` | The `SEEDED_*_MODELS` row. **Claude also:** add the name to `ALLOWED_CLAUDE_MODELS` in the same file. |
+| `apps/nsai/server/src/bot-shared/utils/bot-model-priority.utils.ts` | A priority number in the provider block (higher = more capable/newer). |
+| `apps/nsai/frontend-shared/models/model-display-priority.ts` | The same priority number **and** consider `POPULAR_MODEL_NAMES` (the curated top-of-picker shortcut). |
+| `apps/nsai/web/src/pages/models/components/constants.ts` | The name in the provider's known-model list (Add-Model form suggestions). |
+
+Keep the priority number consistent across the two priority maps (they carry identical blocks).
+Rank the new model against its siblings; renumber the block minimally to avoid collisions within
+a provider.
+
+### Provider routing (server) — the highest-risk step
+
+A model on an **existing** provider+hosting combo usually needs **no** `getAiModel` change — but
+check the provider's name-based branching in `apps/nsai/server/src/utils/ai-model.ts` and
+`apps/nsai/server/src/utils/utils.ts`:
+
+- **Anthropic / Claude:** a thinking-on-by-default model (Opus 5, Sonnet 5, Fable/Mythos) MUST be
+  added to `CLAUDE_ADAPTIVE_THINKING_MODEL_NAMES` in `utils.ts` (adaptive thinking + it makes
+  `shouldOmitTemperatureParam` true — these models **400 if sent `temperature`**). If omitting the
+  `thinking` param should leave thinking ON (so Fast mode must send explicit `disabled`), also add
+  it to `CLAUDE_THINKING_ON_WHEN_OMITTED_MODEL_NAMES`. Mirror the closest sibling exactly
+  (e.g. Opus 5 ↔ Sonnet 5, both sets).
+- **Gemini:** routes by **name prefix** — `gemini-3*` → `thinkingLevel`, `gemini-2.5*` →
+  `thinkingBudget`. A new `gemini-3.x` / `gemini-2.5.x` needs **no** code change.
+- **OpenAI:** name-based special cases exist (`gpt-5-pro`/`gpt-5.4`/`gpt-5.5`/`gpt-5.6` → responses
+  API, `gpt-5.4-mini` → plain chat). A new gpt-5.x may need a branch here.
+- **A brand-new provider or hosting combo** always needs a `getAiModel` change **plus** unit tests
+  in `apps/nsai/server/src/utils/ai-model.spec.ts`.
+
+### Decisions — surface to the user, don't silently change
+
+These reference specific model names as **operational defaults**; changing them shifts routing or
+publishes publicly, so flag rather than auto-edit:
+
+- **Presentation routing defaults** — `PRESENTATION_BEST_MODEL_KEYS` and
+  `BRANDED_PRESENTATION_MODEL_KEY` in `env-config.schema.ts`, the three
+  `apps/nsai/server/.env-flavors/env.example.{staging,prod,1vm}.ts`, and
+  `docs/configuration/backend-envs.md`. Prepending a stronger new model changes prod deck routing.
+- **Landing marketing table** — `apps/nsai/landing/src/app/ai-models/components/ModelsTable/data.ts`
+  is public-facing and carries per-model `countries` availability.
+
+### Leave alone
+
+Test fixtures (`*.spec.ts`) and code comments that merely use a sibling model name are not catalog
+membership — don't add the new model to them.
+
+### Verify
+
+Type-check every package you touched — `migrations`, `server`, `frontend-shared`, `web` — and run
+the affected specs (e.g. `bot-model-priority`, `ai-model.spec.ts`). To seed into a running DB:
+`npm run seed:models:append` from `apps/nsai/migrations`. Then run the `e2e-test-model` skill.
