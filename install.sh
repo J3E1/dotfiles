@@ -19,6 +19,13 @@
 #   4. Atlassian Rovo (codex) — the same Jira/Confluence tools for codex, via the
 #                            curated codex plugin (preferred) or an mcp-remote
 #                            bridge fallback. OAuth is a one-time login.
+#   5. VS Code layer       — my editor settings (Cursor Dark, Material icons,
+#                            sidebar on the right, ...) plus the extensions to
+#                            install and the ones to force-uninstall. Delegated
+#                            to vscode/sync.sh, which runs in the BACKGROUND
+#                            because it has to outlive this script: the VS Code
+#                            server isn't provisioned yet at dotfiles time.
+#                            See vscode/sync.sh for why it polls.
 #
 # Idempotent + non-fatal by design: every step self-skips when already done and
 # never aborts the codespace if a network fetch fails — a missing personal
@@ -134,10 +141,25 @@ setup_codex_atlassian() {
   fi
 }
 
+# ---- 5. VS Code settings + extensions -------------------------------------
+# Backgrounded on purpose: sync.sh waits for the VS Code server to appear and
+# then re-asserts our settings/extensions for a couple of minutes, which is far
+# longer than a dotfiles script should block a codespace boot. Output goes to a
+# log file so a silent background failure is still diagnosable.
+setup_vscode() {
+  local sync="${DOTFILES}/vscode/sync.sh"
+  [ -f "${sync}" ] || { log "no vscode/sync.sh — skipping VS Code layer"; return 0; }
+  local logfile="${HOME}/.dotfiles-vscode-sync.log"
+  log "starting VS Code layer in background (log: ${logfile})"
+  nohup bash "${sync}" >"${logfile}" 2>&1 &
+  disown 2>/dev/null || true
+}
+
 log "bootstrapping from ${DOTFILES}"
 link_skills
 link_skills_codex
 setup_atlassian_plugin
 install_codex
 setup_codex_atlassian
+setup_vscode
 log "done — sign in once: 'claude' + /mcp for Jira; 'codex mcp login atlassian-rovo' for codex Jira"
