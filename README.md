@@ -24,7 +24,7 @@ Everything editor-related lives in `vscode/`:
 
 | File | Purpose |
 |---|---|
-| `settings.json` | My settings — Cursor Dark, Material icons, sidebar right, font size 13, autosave on focus change, AI features off |
+| `settings.json` | My settings — Cursor Dark, Material icons, sidebar right, activity bar on top, font size 13, autosave on focus change, AI features off |
 | `extensions.txt` | Extensions to install (`cedricverlinden.cursor-dark`, `PKief.material-icon-theme`) |
 | `extensions-remove.txt` | Extensions to force-uninstall (Pylance, Python Debugger, Python Environments, GitHub Actions, Copilot) |
 | `sync.sh` | Applies all three; started in the background by `install.sh` |
@@ -42,9 +42,26 @@ then overwrite a naive one-shot write:
   a repo's `devcontainer.json` writes into. nodeshift's sets
   `"workbench.colorTheme": "GitHub Dark"`, which would beat a single early
   write. `sync.sh` merges (our keys win, everything else preserved) and
-  re-asserts until the file stops changing.
+  re-asserts for the whole window.
 - `ms-python.python` re-installs its optional deps (Pylance, debugpy,
   python-envs) when it activates — after a first uninstall pass.
+- VS Code itself rewrites `workbench.colorTheme` **minutes** after attach,
+  normalising the label `Cursor Dark` to the extension's theme id
+  `cursor-dark`. Measured in a real codespace: ~7 minutes after the first pass.
+
+Three consequences, all learned the hard way after the theme silently reverted
+to `Dark 2026` on a fresh codespace:
+
+1. **It watches for 10 minutes and never exits early.** The original version
+   stopped after two quiet rounds (~15s) and so was long gone before VS Code
+   touched anything.
+2. **It writes both `Machine/` and `User/` settings.** Some settings —
+   `workbench.colorTheme` among them — behave as application-scoped and are
+   ignored in Machine settings, where only the User file takes effect.
+3. **The theme id counts as correct.** `sync.sh` reads the installed
+   extension's `package.json` to learn that `cursor-dark` is the id for label
+   `Cursor Dark`, and accepts either. Without this it would rewrite the file
+   every round, fighting the editor forever.
 
 It uses the versioned `code-server` binary, **not** the remote-cli `code`: the
 latter refuses to run outside a VS Code terminal, and `code-server` silently
@@ -58,6 +75,10 @@ reports zero extensions unless given an explicit `--extensions-dir`.
 - **Dropping Pylance also drops Python IntelliSense/type-checking.** The Python
   extension keeps working (they're optional deps), but editing the Python
   services in a codespace will be a plainer experience.
+- **A theme extension installed after the window started isn't loaded until the
+  window reloads.** On the very first attach to a brand-new codespace you may
+  still see the default theme; one reload fixes it and it sticks thereafter.
+  Nothing server-side can force that reload.
 - Log: `~/.dotfiles-vscode-sync.log`. Re-run any time with `~/dotfiles/install.sh`.
 
 ## Activate it (one-time)

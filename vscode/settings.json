@@ -2,6 +2,7 @@
   "workbench.colorTheme": "Cursor Dark",
   "workbench.iconTheme": "material-icon-theme",
   "workbench.sideBar.location": "right",
+  "workbench.activityBar.location": "top",
   "editor.fontSize": 13,
   "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
   "files.autoSave": "onFocusChange",

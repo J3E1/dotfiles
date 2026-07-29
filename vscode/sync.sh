@@ -42,13 +42,29 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_DIR="${HOME}/.vscode-remote"
 EXT_DIR="${REMOTE_DIR}/extensions"
-MACHINE_SETTINGS="${REMOTE_DIR}/data/Machine/settings.json"
 DESIRED_SETTINGS="${HERE}/settings.json"
 ADD_LIST="${HERE}/extensions.txt"
 REMOVE_LIST="${HERE}/extensions-remove.txt"
 
-ROUNDS="${DOTFILES_VSCODE_ROUNDS:-20}"
-SLEEP_SECS="${DOTFILES_VSCODE_SLEEP:-6}"
+# Both scopes get the same keys, on purpose:
+#   Machine — highest non-workspace scope, and where devcontainer.json writes.
+#   User    — some settings (workbench.colorTheme among them) are treated as
+#             application-scoped and are IGNORED in Machine settings, in which
+#             case only the User file takes effect.
+# Writing both is harmless where one is redundant and is the difference between
+# working and silently doing nothing where it isn't.
+SETTINGS_TARGETS=(
+  "${REMOTE_DIR}/data/Machine/settings.json"
+  "${REMOTE_DIR}/data/User/settings.json"
+)
+
+# Watch for 10 minutes by default. This used to be ~2 minutes with an early
+# exit after two quiet rounds, which was measurably too short: in a real
+# codespace VS Code rewrote workbench.colorTheme (normalising the label
+# "Cursor Dark" to its id "cursor-dark") about 7 minutes after the script had
+# already exited, so nothing was left running to notice.
+ROUNDS="${DOTFILES_VSCODE_ROUNDS:-60}"
+SLEEP_SECS="${DOTFILES_VSCODE_SLEEP:-10}"
 
 # To stderr on purpose: sync_extensions returns its pending count on stdout via
 # command substitution, which would otherwise capture these log lines too.
@@ -84,12 +100,38 @@ find_code_server() {
 # Returns 0 only if the file ended up containing all our keys.
 apply_settings() {
   [ -f "${DESIRED_SETTINGS}" ] || return 0
-  mkdir -p "$(dirname "${MACHINE_SETTINGS}")" 2>/dev/null
-  python3 - "${MACHINE_SETTINGS}" "${DESIRED_SETTINGS}" <<'PY'
-import json, os, sys
+  local target rc=0 changed=0 deferred=0
+  for target in "${SETTINGS_TARGETS[@]}"; do
+    mkdir -p "$(dirname "${target}")" 2>/dev/null
+    python3 - "${target}" "${DESIRED_SETTINGS}" "${EXT_DIR}" <<'PY'
+import glob, json, os, sys
 
-target, desired_path = sys.argv[1], sys.argv[2]
+target, desired_path, ext_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 desired = json.load(open(desired_path))
+
+def theme_aliases(label):
+    """Every value VS Code may legitimately store for this theme label.
+
+    VS Code normalises a theme label to the id declared in the extension's
+    package.json ("Cursor Dark" -> "cursor-dark") once it applies the theme.
+    Treating that as "wrong" makes this script fight the editor and rewrite the
+    file on every round forever, so accept both forms.
+    """
+    names = {label}
+    for pkg in glob.glob(os.path.join(ext_dir, "*", "package.json")):
+        try:
+            with open(pkg) as fh:
+                contributes = json.load(fh).get("contributes", {})
+        except (ValueError, OSError):
+            continue
+        for theme in contributes.get("themes", []) or []:
+            if theme.get("label") == label and theme.get("id"):
+                names.add(theme["id"])
+    return names
+
+ACCEPTED = {}
+if "workbench.colorTheme" in desired:
+    ACCEPTED["workbench.colorTheme"] = theme_aliases(desired["workbench.colorTheme"])
 
 current = {}
 if os.path.exists(target):
@@ -103,17 +145,33 @@ if os.path.exists(target):
         print(f"unparseable {target}: {exc}", file=sys.stderr)
         sys.exit(2)
 
-if all(current.get(k) == v for k, v in desired.items()):
+def satisfied(key, want):
+    got = current.get(key)
+    if key in ACCEPTED:
+        return got in ACCEPTED[key]
+    return got == want
+
+missing = {k: v for k, v in desired.items() if not satisfied(k, v)}
+if not missing:
     sys.exit(0)          # already correct, nothing written
 
-current.update(desired)
+current.update(missing)
 tmp = target + ".dotfiles.tmp"
 with open(tmp, "w") as fh:
     json.dump(current, fh, indent=2, sort_keys=True)
     fh.write("\n")
 os.replace(tmp, target)  # atomic: never leave a half-written settings file
+print(",".join(sorted(missing)), file=sys.stderr)
 sys.exit(10)             # signals "changed"
 PY
+    case "$?" in
+      10) changed=1 ;;
+      2)  deferred=1 ;;
+    esac
+  done
+  [ "${deferred}" = "1" ] && return 2
+  [ "${changed}" = "1" ] && return 10
+  return 0
 }
 
 # Install missing extensions and uninstall unwanted ones.
@@ -149,39 +207,43 @@ sync_extensions() {
 
 log "starting (up to ${ROUNDS} rounds, ${SLEEP_SECS}s apart)"
 
-settled=0
+# Deliberately runs the FULL window rather than exiting on the first quiet
+# rounds. VS Code touches these settings minutes after attach, so an early exit
+# is the bug that let the color theme silently revert. Quiet rounds are cheap
+# and log nothing; only actual corrections are logged.
+ext_quiet=0
+corrections=0
+
 for round in $(seq 1 "${ROUNDS}"); do
   apply_settings
   case "$?" in
     0)  settings_state="ok" ;;
-    10) settings_state="rewritten" ;;
+    10) settings_state="corrected"; corrections=$((corrections + 1)) ;;
     *)  settings_state="deferred" ;;
   esac
+  [ "${settings_state}" != "ok" ] && log "round ${round}/${ROUNDS}: settings ${settings_state}"
 
-  cli="$(find_code_server)"
-  if [ -z "${cli}" ]; then
-    log "round ${round}/${ROUNDS}: settings=${settings_state}, server not provisioned yet"
-    sleep "${SLEEP_SECS}"
-    continue
-  fi
-
-  pending="$(sync_extensions "${cli}")"
-
-  if [ "${settings_state}" = "ok" ] && [ "${pending}" = "0" ]; then
-    # Two consecutive clean rounds: nothing was rewritten and nothing was
-    # reinstalled behind our back, so the environment has stopped changing.
-    settled=$((settled + 1))
-    if [ "${settled}" -ge 2 ]; then
-      log "settled after ${round} round(s) — settings and extensions in desired state"
-      exit 0
+  # Once extensions have been in the desired state for a few consecutive rounds,
+  # stop shelling out to code-server every round — each call spawns node, and
+  # the remaining rounds exist to watch the (cheap) settings files.
+  if [ "${ext_quiet}" -lt 3 ]; then
+    cli="$(find_code_server)"
+    if [ -z "${cli}" ]; then
+      [ "${round}" -le 3 ] && log "round ${round}/${ROUNDS}: VS Code server not provisioned yet"
+    else
+      pending="$(sync_extensions "${cli}")"
+      if [ "${pending}" = "0" ]; then
+        ext_quiet=$((ext_quiet + 1))
+      else
+        ext_quiet=0
+        corrections=$((corrections + 1))
+      fi
     fi
-  else
-    settled=0
-    log "round ${round}/${ROUNDS}: settings=${settings_state}, pending extensions=${pending}"
   fi
 
   sleep "${SLEEP_SECS}"
 done
 
-log "window closed after ${ROUNDS} rounds — re-run ~/dotfiles/install.sh if anything looks off"
+log "window closed after ${ROUNDS} rounds (${corrections} correction(s) applied)"
+log "if the color theme still isn't active, reload the window once — a theme extension installed after the window started isn't loaded until reload"
 exit 0
