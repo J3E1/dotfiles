@@ -1,0 +1,24 @@
+# Extensions to uninstall from every codespace, one marketplace ID per line.
+# Blank lines and #-comments ignored.
+#
+# Why these can't just be "left out of a list": nothing here is opt-in. They
+# are pushed in by a repo's devcontainer.json or auto-installed as dependencies,
+# so removing them requires an actual uninstall.
+
+# Pulled in automatically as OPTIONAL dependencies of ms-python.python. The
+# Python extension stays fully functional without them (its own marketplace
+# page says so), but note that dropping Pylance also drops Python
+# IntelliSense/type-checking.
+ms-python.vscode-pylance
+ms-python.debugpy
+ms-python.vscode-python-envs
+
+# Listed in the nodeshift devcontainer.json extensions array.
+GitHub.vscode-github-actions
+
+# Copilot is normally NOT installed as an extension in these codespaces — the
+# chat UI is built into the VS Code workbench and is switched off by
+# "chat.disableAIFeatures" in settings.json instead. These two entries only
+# matter if a client with Settings Sync pushes the real extensions in.
+GitHub.copilot
+GitHub.copilot-chat

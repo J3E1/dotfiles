@@ -1,0 +1,13 @@
+{
+  "workbench.colorTheme": "Cursor Dark",
+  "workbench.iconTheme": "material-icon-theme",
+  "workbench.sideBar.location": "right",
+  "editor.fontSize": 13,
+  "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
+  "files.autoSave": "onFocusChange",
+  "terminal.integrated.fontSize": 13,
+  "chat.disableAIFeatures": true,
+  "github.copilot.enable": {
+    "*": false
+  }
+}

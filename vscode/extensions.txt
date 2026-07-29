@@ -1,0 +1,9 @@
+# Extensions to install into every codespace, one marketplace ID per line.
+# Blank lines and #-comments ignored.
+
+# Cursor Dark theme by Cédric Verlinden — provides the "Cursor Dark" theme
+# label referenced by workbench.colorTheme in settings.json.
+cedricverlinden.cursor-dark
+
+# Material Icon Theme — provides the "material-icon-theme" iconTheme id.
+PKief.material-icon-theme
